@@ -155,7 +155,7 @@ async function trackShopifyFulfillment(order) {
     return publicTrackingData({
       orderRefNumber: order.name,
       transactionStatus: order.displayFulfillmentStatus || "Unfulfilled",
-      message: "Order mil gaya hai, lekin Shopify par shipment tracking abhi add nahi hui.",
+      message: "Your order has been found. Shipment tracking will appear here once it is available.",
     });
   }
 
@@ -173,7 +173,7 @@ async function trackShopifyFulfillment(order) {
     trackingNumber: tracking.number,
     transactionStatus: order.fulfillments?.[0]?.displayStatus || order.displayFulfillmentStatus || "In transit",
     trackingUrl: tracking.url || "",
-    message: "Shopify par shipment mil gaya hai. Latest courier status filhal available nahi.",
+    message: "We found your shipment, but the latest courier update is temporarily unavailable. Please try again later.",
   });
 }
 
@@ -186,7 +186,7 @@ app.get("/api/track", async (req, res) => {
   try {
     const data = await postexGet(`${POSTEX_API}/track-order/${encodeURIComponent(tracking)}`);
     if (!validResult(data) || !data.dist) {
-      return res.status(404).json({ success: false, message: "Tracking not found" });
+      return res.status(404).json({ success: false, message: "We couldn't find tracking details for that number. Please check it and try again." });
     }
     return res.json(publicTrackingData(data.dist));
   } catch (error) {
@@ -218,7 +218,7 @@ app.get("/api/track-order", async (req, res) => {
     if (SHOPIFY_STORE_DOMAIN && (SHOPIFY_ADMIN_ACCESS_TOKEN || (SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET))) {
       const shopifyOrder = await findShopifyOrder(orderNumber, customer);
       if (!shopifyOrder) {
-        return res.status(404).json({ success: false, message: "Shopify order nahi mila. Order number aur checkout email/phone check karein." });
+        return res.status(404).json({ success: false, message: "We couldn't find an order matching those details. Check your order number and checkout email or phone, then try again." });
       }
       return res.json(await trackShopifyFulfillment(shopifyOrder));
     }
@@ -263,7 +263,7 @@ app.get("/api/track-order", async (req, res) => {
     if (!found) {
       return res.status(404).json({
         success: false,
-        message: "Order was not found in PostEx. Shopify lookup is not configured on the server yet.",
+        message: "We couldn't find shipment details for this order. Please check your details or contact our support team.",
       });
     }
 

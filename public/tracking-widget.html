@@ -15,7 +15,7 @@
     .uanaturals-tracking .submit{width:100%;height:50px;border:0;border-radius:14px;background:#999;color:#fff;font-size:17px;font-weight:700;cursor:pointer}
     .uanaturals-tracking .submit:disabled{opacity:.65;cursor:wait}.uanaturals-tracking [hidden]{display:none!important}
     .uanaturals-tracking .error{color:#a12828;font-size:14px;margin:14px 0 0}.uanaturals-tracking .result{display:none;margin-top:24px;padding:22px;border-radius:12px;background:#f7f7f7}
-    .uanaturals-tracking .result-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.uanaturals-tracking .badge{font-weight:bold}.uanaturals-tracking .event{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px;background:#fff;border-radius:8px}
+    .uanaturals-tracking .result-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}.uanaturals-tracking .meta-item{display:flex;align-items:baseline;gap:6px}.uanaturals-tracking .meta-label{color:#666}.uanaturals-tracking .badge{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;background:#7D7C64;color:#fff;font-weight:600}.uanaturals-tracking .notice{padding:14px 16px;border-radius:8px;background:#fff;color:#444;line-height:1.5}.uanaturals-tracking .event{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px;background:#fff;border-radius:8px}
     .uanaturals-tracking .event-icon{display:flex;flex:0 0 40px;width:40px;height:40px;align-items:center;justify-content:center;border-radius:50%;background:#7D7C64;color:#fff;font-size:18px}
     @media(max-width:520px){.uanaturals-tracking{padding:28px 22px}.uanaturals-tracking h2{font-size:22px}.uanaturals-tracking .tab,.uanaturals-tracking label,.uanaturals-tracking input{font-size:15px}.uanaturals-tracking .tabs{margin-bottom:28px}}
   </style>
@@ -39,7 +39,11 @@
   </form>
   <p class="error" data-error role="alert" hidden></p>
   <section class="result" data-result aria-live="polite">
-    <div class="result-head"><span>Order: <strong data-ref></strong></span><span class="badge" data-status></span><span>Receiver: <strong data-name></strong></span></div>
+    <div class="result-head">
+      <span class="meta-item"><span class="meta-label">Order</span><strong data-ref></strong></span>
+      <span class="badge"><i class="fa-solid fa-box" aria-hidden="true"></i><span data-status></span></span>
+      <span class="meta-item" data-receiver hidden><span class="meta-label">Receiver</span><strong data-name></strong></span>
+    </div>
     <div data-timeline></div>
   </section>
   <script>
@@ -74,8 +78,12 @@
           const response = await fetch(url), data = await response.json();
           if (!response.ok) throw new Error(data.message || "Order not found.");
           root.querySelector("[data-ref]").textContent = data.orderRefNumber || data.trackingNumber || trackingInput.value.trim();
-          root.querySelector("[data-status]").textContent = data.transactionStatus || "Unknown";
-          root.querySelector("[data-name]").textContent = data.customerName || "-";
+          const status = String(data.transactionStatus || "Unknown").replaceAll("_", " ").toLowerCase()
+            .replace(/\b\w/g, character => character.toUpperCase());
+          root.querySelector("[data-status]").textContent = status;
+          const customerName = String(data.customerName || "").trim();
+          root.querySelector("[data-name]").textContent = customerName;
+          root.querySelector("[data-receiver]").hidden = !customerName;
           (Array.isArray(data.transactionStatusHistory) ? data.transactionStatusHistory.slice().reverse() : []).forEach(item => {
             const row = document.createElement("div"); row.className = "event";
             const code = String(item.transactionStatusMessageCode || "");
@@ -90,7 +98,12 @@
             date.textContent = when ? new Date(when).toLocaleString() : "";
             const details = document.createElement("div"); details.append(title, date); row.append(icon, details); timeline.append(row);
           });
-          if (!timeline.childElementCount) timeline.textContent = data.message || "No shipment events have been reported yet.";
+          if (!timeline.childElementCount) {
+            timeline.classList.add("notice");
+            timeline.textContent = data.message || "There are no shipment updates to show yet. Please check back later.";
+          } else {
+            timeline.classList.remove("notice");
+          }
           if (data.trackingUrl) {
             const trackingLink = document.createElement("a");
             trackingLink.href = data.trackingUrl; trackingLink.target = "_blank"; trackingLink.rel = "noopener noreferrer";
