@@ -223,7 +223,10 @@ app.get("/api/track-order", async (req, res) => {
           && orderPhone.slice(-10) === phoneDigits.slice(-10));
       });
     if (!found) {
-      return res.status(404).json({ success: false, message: "Order not found. Check the order number and email." });
+      return res.status(404).json({
+        success: false,
+        message: "Order was not found in PostEx. Shopify lookup is not configured on the server yet.",
+      });
     }
 
     // Return only information needed by the customer-facing tracking page.
