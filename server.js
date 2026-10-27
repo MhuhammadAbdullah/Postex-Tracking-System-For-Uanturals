@@ -59,6 +59,47 @@ function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function orderMatchesCustomer(order, orderNumber, customer) {
+  const cleanOrderNumber = (value) => String(value || "").trim().replace(/^#/, "").toLowerCase();
+  if (cleanOrderNumber(order?.orderRefNumber) !== cleanOrderNumber(orderNumber)) return false;
+  const email = customer.toLowerCase();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return String(order?.deliveryAddress || "").trim().toLowerCase() === email;
+  }
+  const phone = normalizePhone(customer);
+  const orderPhone = normalizePhone(order?.customerPhone);
+  return phone.length >= 10 && orderPhone.length >= 10
+    && phone.slice(-10) === orderPhone.slice(-10);
+}
+
+async function findPostexOrder(orderNumber, customer) {
+  const today = new Date();
+  const fromDate = new Date(today);
+  fromDate.setUTCDate(fromDate.getUTCDate() - Math.max(1, POSTEX_LOOKBACK_DAYS));
+  const startDate = fromDate.toISOString().slice(0, 10);
+  const endDate = today.toISOString().slice(0, 10);
+  const params = new URLSearchParams({
+    orderStatusId: "0", startDate, endDate,
+    orderStatusID: "0", fromDate: startDate, toDate: endDate,
+  });
+  const data = await postexGet(`${POSTEX_API}/get-all-order?${params}`, {
+    orderStatusId: "0", startDate, endDate, fromDate: startDate, toDate: endDate,
+  });
+  if (!validResult(data) || !Array.isArray(data.dist)) return null;
+  return data.dist.map((entry) => entry?.trackingResponse || entry)
+    .find((order) => orderMatchesCustomer(order, orderNumber, customer)) || null;
+}
+
+async function livePostexTracking(order, fallbackOrderNumber = "") {
+  if (!order?.trackingNumber) return null;
+  const data = await postexGet(`${POSTEX_API}/track-order/${encodeURIComponent(order.trackingNumber)}`);
+  if (!validResult(data) || !data.dist) return null;
+  return publicTrackingData({
+    ...data.dist,
+    orderRefNumber: data.dist.orderRefNumber || order.orderRefNumber || fallbackOrderNumber,
+  });
+}
+
 let shopifyTokenCache = null;
 
 async function getShopifyAccessToken(shopDomain) {
@@ -148,24 +189,44 @@ async function findShopifyOrder(orderNumber, customer) {
   }) || null;
 }
 
-async function trackShopifyFulfillment(order) {
+async function trackShopifyFulfillment(order, orderNumber, customer) {
   const tracking = (order.fulfillments || []).flatMap((fulfillment) => fulfillment.trackingInfo || [])
     .find((info) => info.number);
+  if (tracking) {
+    try {
+      const live = await livePostexTracking({ trackingNumber: tracking.number, orderRefNumber: order.name });
+      if (live) return live;
+    } catch (error) {
+      console.error("PostEx tracking lookup for Shopify order failed:", error.message);
+    }
+  }
+
+  // Shopify might not have the PostEx tracking number saved on the fulfillment yet.
+  try {
+    const postexOrder = await findPostexOrder(orderNumber, customer);
+    if (postexOrder?.trackingNumber) {
+      try {
+        const live = await livePostexTracking(postexOrder, order.name);
+        if (live) return live;
+      } catch (error) {
+        console.error("PostEx live tracking lookup failed:", error.message);
+      }
+      return publicTrackingData({
+        ...postexOrder,
+        orderRefNumber: order.name,
+        message: "We found your shipment, but the latest courier update is temporarily unavailable. Please try again later.",
+      });
+    }
+  } catch (error) {
+    console.error("PostEx order-reference lookup for Shopify order failed:", error.message);
+  }
+
   if (!tracking) {
     return publicTrackingData({
       orderRefNumber: order.name,
       transactionStatus: order.displayFulfillmentStatus || "Unfulfilled",
       message: "Your order has been found. Shipment tracking will appear here once it is available.",
     });
-  }
-
-  try {
-    const data = await postexGet(`${POSTEX_API}/track-order/${encodeURIComponent(tracking.number)}`);
-    if (validResult(data) && data.dist) {
-      return publicTrackingData({ ...data.dist, orderRefNumber: order.name });
-    }
-  } catch (error) {
-    console.error("PostEx tracking lookup for Shopify order failed:", error.message);
   }
 
   return publicTrackingData({
@@ -220,46 +281,10 @@ app.get("/api/track-order", async (req, res) => {
       if (!shopifyOrder) {
         return res.status(404).json({ success: false, message: "We couldn't find an order matching those details. Check your order number and checkout email or phone, then try again." });
       }
-      return res.json(await trackShopifyFulfillment(shopifyOrder));
+      return res.json(await trackShopifyFulfillment(shopifyOrder, orderNumber, customer));
     }
 
-    const today = new Date();
-    const fromDate = new Date(today);
-    fromDate.setUTCDate(fromDate.getUTCDate() - Math.max(1, POSTEX_LOOKBACK_DAYS));
-    const startDate = fromDate.toISOString().slice(0, 10);
-    const endDate = today.toISOString().slice(0, 10);
-    const params = new URLSearchParams({
-      orderStatusId: "0",
-      startDate,
-      endDate,
-      // Keep the guide's names too; PostEx deployments use both parameter conventions.
-      orderStatusID: "0",
-      fromDate: startDate,
-      toDate: endDate,
-    });
-    const data = await postexGet(`${POSTEX_API}/get-all-order?${params}`, {
-      orderStatusId: "0",
-      startDate,
-      endDate,
-      fromDate: startDate,
-      toDate: endDate,
-    });
-    if (!validResult(data) || !Array.isArray(data.dist)) {
-      return res.status(502).json({
-        success: false,
-        message: data?.statusMessage || "PostEx rejected the order lookup request.",
-      });
-    }
-
-    const found = data.dist.map((entry) => entry?.trackingResponse || entry)
-      .find((order) => {
-        const cleanOrderNumber = (value) => String(value || "").trim().replace(/^#/, "").toLowerCase();
-        if (cleanOrderNumber(order?.orderRefNumber) !== cleanOrderNumber(orderNumber)) return false;
-        if (isEmail) return String(order?.deliveryAddress || "").trim().toLowerCase() === email;
-        const orderPhone = String(order?.customerPhone || "").replace(/\D/g, "");
-        return orderPhone === phoneDigits || (orderPhone.length >= 10 && phoneDigits.length >= 10
-          && orderPhone.slice(-10) === phoneDigits.slice(-10));
-      });
+    const found = await findPostexOrder(orderNumber, customer);
     if (!found) {
       return res.status(404).json({
         success: false,
@@ -267,8 +292,8 @@ app.get("/api/track-order", async (req, res) => {
       });
     }
 
-    // Return only information needed by the customer-facing tracking page.
-    return res.json(publicTrackingData({ ...found, orderRefNumber: found.orderRefNumber || orderNumber }));
+    const live = await livePostexTracking(found, orderNumber);
+    return res.json(live || publicTrackingData({ ...found, orderRefNumber: found.orderRefNumber || orderNumber }));
   } catch (error) {
     console.error("PostEx order lookup error:", error.message);
     const missingToken = !POSTEX_TOKEN;
