@@ -1,4 +1,5 @@
 <div class="uanaturals-tracking">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     .uanaturals-tracking{max-width:690px;margin:16px auto;padding:36px 46px;background:#fff;border-radius:15px;box-shadow:0 4px 18px #00000014;font:18px Arial,sans-serif;color:#111;box-sizing:border-box}
     .uanaturals-tracking *{box-sizing:border-box}.uanaturals-tracking h2{text-align:center;font-size:25px;margin:0 0 34px;font-weight:700}
@@ -11,7 +12,8 @@
     .uanaturals-tracking .submit{width:100%;height:50px;border:0;border-radius:14px;background:#999;color:#fff;font-size:17px;font-weight:700;cursor:pointer}
     .uanaturals-tracking .submit:disabled{opacity:.65;cursor:wait}.uanaturals-tracking [hidden]{display:none!important}
     .uanaturals-tracking .error{color:#a12828;font-size:14px;margin:14px 0 0}.uanaturals-tracking .result{display:none;margin-top:24px;padding:22px;border-radius:12px;background:#f7f7f7}
-    .uanaturals-tracking .result-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.uanaturals-tracking .badge{font-weight:bold}.uanaturals-tracking .event{margin-top:12px;padding:12px;background:#fff;border-radius:8px}
+    .uanaturals-tracking .result-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.uanaturals-tracking .badge{font-weight:bold}.uanaturals-tracking .event{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px;background:#fff;border-radius:8px}
+    .uanaturals-tracking .event-icon{display:flex;flex:0 0 40px;width:40px;height:40px;align-items:center;justify-content:center;border-radius:50%;background:#7D7C64;color:#fff;font-size:18px}
     @media(max-width:520px){.uanaturals-tracking{padding:28px 22px}.uanaturals-tracking h2{font-size:22px}.uanaturals-tracking .tab,.uanaturals-tracking label,.uanaturals-tracking input{font-size:15px}.uanaturals-tracking .tabs{margin-bottom:28px}}
   </style>
   <h2>ORDER TRACKING</h2>
@@ -73,9 +75,17 @@
           root.querySelector("[data-name]").textContent = data.customerName || "-";
           (Array.isArray(data.transactionStatusHistory) ? data.transactionStatusHistory.slice().reverse() : []).forEach(item => {
             const row = document.createElement("div"); row.className = "event";
+            const code = String(item.transactionStatusMessageCode || "");
+            const iconName = code === "0005" ? "fa-circle-check"
+              : ["0001", "0003", "0035", "0036"].includes(code) ? "fa-warehouse"
+              : ["0004", "0031", "0033"].includes(code) ? "fa-truck"
+              : ["0008", "0013", "0038"].includes(code) ? "fa-boxes-stacked" : "fa-box";
+            const icon = document.createElement("span"); icon.className = "event-icon";
+            icon.innerHTML = `<i class="fa-solid ${iconName}" aria-hidden="true"></i>`;
             const title = document.createElement("strong"); title.textContent = item.transactionStatusMessage || "Status update";
             const date = document.createElement("div"), when = item.updatedAt || item.transactionStatusDate || item.statusDate;
-            date.textContent = when ? new Date(when).toLocaleString() : ""; row.append(title, date); timeline.append(row);
+            date.textContent = when ? new Date(when).toLocaleString() : "";
+            const details = document.createElement("div"); details.append(title, date); row.append(icon, details); timeline.append(row);
           });
           if (!timeline.childElementCount) timeline.textContent = "No shipment events have been reported yet.";
           result.style.display = "block";
