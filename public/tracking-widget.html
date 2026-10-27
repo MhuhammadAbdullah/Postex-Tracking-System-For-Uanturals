@@ -1,0 +1,87 @@
+<div class="uanaturals-tracking">
+  <style>
+    .uanaturals-tracking{max-width:690px;margin:16px auto;padding:36px 46px;background:#fff;border-radius:15px;box-shadow:0 4px 18px #00000014;font:18px Arial,sans-serif;color:#111;box-sizing:border-box}
+    .uanaturals-tracking *{box-sizing:border-box}.uanaturals-tracking h2{text-align:center;font-size:25px;margin:0 0 34px;font-weight:700}
+    .uanaturals-tracking .tabs{display:flex;border-bottom:1px solid #ccc;margin:0 0 36px}
+    .uanaturals-tracking .tab{flex:1;text-align:center;background:none;border:0;border-bottom:3px solid transparent;padding:12px 4px 14px;color:#707070;font-size:18px;font-weight:400;cursor:pointer}
+    .uanaturals-tracking .tab.active{border-color:#111;color:#111;font-weight:600}
+    .uanaturals-tracking label{display:block;margin:0 0 10px;font-size:18px}
+    .uanaturals-tracking input{width:100%;height:51px;margin:0 0 24px;padding:0 16px;border:1px solid #ccc;border-radius:14px;font-size:18px;color:#111}
+    .uanaturals-tracking input::placeholder{color:#888}.uanaturals-tracking input:focus{outline:2px solid #888;outline-offset:1px}
+    .uanaturals-tracking .submit{width:100%;height:50px;border:0;border-radius:14px;background:#999;color:#fff;font-size:17px;font-weight:700;cursor:pointer}
+    .uanaturals-tracking .submit:disabled{opacity:.65;cursor:wait}.uanaturals-tracking [hidden]{display:none!important}
+    .uanaturals-tracking .error{color:#a12828;font-size:14px;margin:14px 0 0}.uanaturals-tracking .result{display:none;margin-top:24px;padding:22px;border-radius:12px;background:#f7f7f7}
+    .uanaturals-tracking .result-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.uanaturals-tracking .badge{font-weight:bold}.uanaturals-tracking .event{margin-top:12px;padding:12px;background:#fff;border-radius:8px}
+    @media(max-width:520px){.uanaturals-tracking{padding:28px 22px}.uanaturals-tracking h2{font-size:22px}.uanaturals-tracking .tab,.uanaturals-tracking label,.uanaturals-tracking input{font-size:15px}.uanaturals-tracking .tabs{margin-bottom:28px}}
+  </style>
+  <h2>ORDER TRACKING</h2>
+  <div class="tabs" role="tablist" aria-label="Tracking method">
+    <button class="tab active" type="button" role="tab" aria-selected="true" data-mode="order">ORDER NUMBER</button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-mode="tracking">TRACKING NUMBER</button>
+  </div>
+  <form data-form>
+    <div data-order-fields>
+      <label for="ua-order-number">ORDER NUMBER</label>
+      <input id="ua-order-number" data-order placeholder="ORDER NUMBER" autocomplete="off" required>
+      <label for="ua-customer-contact">EMAIL OR PHONE NUMBER</label>
+      <input id="ua-customer-contact" data-contact placeholder="EMAIL OR PHONE NUMBER" autocomplete="email" required>
+    </div>
+    <div data-tracking-fields hidden>
+      <label for="ua-tracking-number">TRACKING NUMBER</label>
+      <input id="ua-tracking-number" data-tracking placeholder="TRACKING NUMBER" autocomplete="off" disabled>
+    </div>
+    <button class="submit" data-submit type="submit">TRACK YOUR ORDER</button>
+  </form>
+  <p class="error" data-error role="alert" hidden></p>
+  <section class="result" data-result aria-live="polite">
+    <div class="result-head"><span>Order: <strong data-ref></strong></span><span class="badge" data-status></span><span>Receiver: <strong data-name></strong></span></div>
+    <div data-timeline></div>
+  </section>
+  <script>
+    (() => {
+      const root = document.currentScript.parentElement;
+      const api = "https://postex-tracking-system-for-uanturals.onrender.com";
+      let mode = "order";
+      const tabs = [...root.querySelectorAll("[data-mode]")];
+      const orderFields = root.querySelector("[data-order-fields]"), trackingFields = root.querySelector("[data-tracking-fields]");
+      const orderInput = root.querySelector("[data-order]"), contactInput = root.querySelector("[data-contact]"), trackingInput = root.querySelector("[data-tracking]");
+      tabs.forEach(tab => tab.addEventListener("click", () => {
+        mode = tab.dataset.mode;
+        tabs.forEach(item => { const active = item === tab; item.classList.toggle("active", active); item.setAttribute("aria-selected", String(active)); });
+        orderFields.hidden = mode !== "order"; trackingFields.hidden = mode !== "tracking";
+        orderInput.disabled = contactInput.disabled = mode !== "order";
+        trackingInput.disabled = mode !== "tracking";
+        orderInput.required = contactInput.required = mode === "order";
+        trackingInput.required = mode === "tracking";
+      }));
+      root.querySelector("[data-form]").addEventListener("submit", async event => {
+        event.preventDefault();
+        const error = root.querySelector("[data-error]"), result = root.querySelector("[data-result]"), timeline = root.querySelector("[data-timeline]"), button = root.querySelector("[data-submit]");
+        error.hidden = true; result.style.display = "none"; timeline.replaceChildren(); button.disabled = true; button.textContent = "PLEASE WAIT...";
+        try {
+          let url;
+          if (mode === "order") {
+            const query = new URLSearchParams({ orderNumber: orderInput.value.trim(), customer: contactInput.value.trim() });
+            url = `${api}/api/track-order?${query}`;
+          } else {
+            url = `${api}/api/track?tracking=${encodeURIComponent(trackingInput.value.trim())}`;
+          }
+          const response = await fetch(url), data = await response.json();
+          if (!response.ok) throw new Error(data.message || "Order not found.");
+          root.querySelector("[data-ref]").textContent = data.orderRefNumber || data.trackingNumber || trackingInput.value.trim();
+          root.querySelector("[data-status]").textContent = data.transactionStatus || "Unknown";
+          root.querySelector("[data-name]").textContent = data.customerName || "-";
+          (Array.isArray(data.transactionStatusHistory) ? data.transactionStatusHistory.slice().reverse() : []).forEach(item => {
+            const row = document.createElement("div"); row.className = "event";
+            const title = document.createElement("strong"); title.textContent = item.transactionStatusMessage || "Status update";
+            const date = document.createElement("div"), when = item.updatedAt || item.transactionStatusDate || item.statusDate;
+            date.textContent = when ? new Date(when).toLocaleString() : ""; row.append(title, date); timeline.append(row);
+          });
+          if (!timeline.childElementCount) timeline.textContent = "No shipment events have been reported yet.";
+          result.style.display = "block";
+        } catch (e) { error.textContent = e.message || "Could not fetch your order. Please try again."; error.hidden = false; }
+        finally { button.disabled = false; button.textContent = "TRACK YOUR ORDER"; }
+      });
+    })();
+  </script>
+</div>
