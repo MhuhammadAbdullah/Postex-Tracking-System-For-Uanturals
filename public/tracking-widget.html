@@ -90,7 +90,12 @@
             date.textContent = when ? new Date(when).toLocaleString() : "";
             const details = document.createElement("div"); details.append(title, date); row.append(icon, details); timeline.append(row);
           });
-          if (!timeline.childElementCount) timeline.textContent = "No shipment events have been reported yet.";
+          if (!timeline.childElementCount) timeline.textContent = data.message || "No shipment events have been reported yet.";
+          if (data.trackingUrl) {
+            const trackingLink = document.createElement("a");
+            trackingLink.href = data.trackingUrl; trackingLink.target = "_blank"; trackingLink.rel = "noopener noreferrer";
+            trackingLink.textContent = "Open courier tracking"; timeline.append(trackingLink);
+          }
           result.style.display = "block";
         } catch (e) { error.textContent = e.message || "Could not fetch your order. Please try again."; error.hidden = false; }
         finally { button.disabled = false; button.textContent = "TRACK YOUR ORDER"; }

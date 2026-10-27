@@ -11,6 +11,8 @@ PostEx's guide does not provide a direct order-reference lookup. The second rout
 
 Set `MY_POSTEX_TOKEN` in the hosting provider's secret/environment settings. Never place the token in browser code or commit it. The token pasted in the request should be rotated in the PostEx merchant panel, then the replacement saved as `MY_POSTEX_TOKEN`.
 
+For Shopify order-number lookup, also set `SHOPIFY_STORE_DOMAIN` and `SHOPIFY_ADMIN_ACCESS_TOKEN` in hosting secrets. The Shopify custom app needs `read_orders` and protected customer data access for order email/phone; access to orders older than 60 days requires Shopify's `read_all_orders` approval as well. When these Shopify settings are present, the endpoint verifies the order against Shopify first and then uses the fulfillment tracking number to request live PostEx status. Without them it falls back to searching PostEx's order list.
+
 Optional: set `ALLOWED_ORIGINS` to a comma-separated list of storefront origins. The default is `https://www.uanaturals.com,http://localhost:3000`.
 
 For local development, copy `.env.example` to `.env` and add the token. `.env` is ignored by Git.
