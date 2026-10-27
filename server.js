@@ -15,15 +15,18 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "https://www.uanaturals.
 
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 
-async function postexGet(url) {
+async function postexGet(url, extraHeaders = {}) {
   if (!POSTEX_TOKEN) throw new Error("PostEx token is not configured");
   const response = await fetch(url, {
-    headers: { token: POSTEX_TOKEN, "Content-Type": "application/json" },
+    headers: { token: POSTEX_TOKEN, "Content-Type": "application/json", ...extraHeaders },
     signal: AbortSignal.timeout(30000),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data) {
-    throw Object.assign(new Error(`PostEx request failed (${response.status})`), { status: response.status });
+    throw Object.assign(new Error(`PostEx request failed (${response.status})`), {
+      status: response.status,
+      responseMessage: typeof data?.statusMessage === "string" ? data.statusMessage : "",
+    });
   }
   return data;
 }
@@ -86,12 +89,24 @@ app.get("/api/track-order", async (req, res) => {
     const today = new Date();
     const fromDate = new Date(today);
     fromDate.setUTCDate(fromDate.getUTCDate() - Math.max(1, POSTEX_LOOKBACK_DAYS));
+    const startDate = fromDate.toISOString().slice(0, 10);
+    const endDate = today.toISOString().slice(0, 10);
     const params = new URLSearchParams({
+      orderStatusId: "0",
+      startDate,
+      endDate,
+      // Keep the guide's names too; PostEx deployments use both parameter conventions.
       orderStatusID: "0",
-      fromDate: fromDate.toISOString().slice(0, 10),
-      toDate: today.toISOString().slice(0, 10),
+      fromDate: startDate,
+      toDate: endDate,
     });
-    const data = await postexGet(`${POSTEX_API}/get-all-order?${params}`);
+    const data = await postexGet(`${POSTEX_API}/get-all-order?${params}`, {
+      orderStatusId: "0",
+      startDate,
+      endDate,
+      fromDate: startDate,
+      toDate: endDate,
+    });
     if (!validResult(data) || !Array.isArray(data.dist)) {
       return res.status(502).json({
         success: false,
@@ -120,7 +135,7 @@ app.get("/api/track-order", async (req, res) => {
     return res.status(missingToken ? 503 : 502).json({
       success: false,
       message: missingToken ? "Tracking service is not configured"
-        : error.status ? `PostEx rejected the request (HTTP ${error.status}). Check the API token and request settings.`
+        : error.status ? `PostEx request rejected (HTTP ${error.status})${error.responseMessage ? `: ${error.responseMessage}` : ". Check the API token and request settings."}`
         : "PostEx did not respond in time. Please try again later.",
     });
   }
