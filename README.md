@@ -5,7 +5,7 @@ The server exposes two customer-facing routes:
 - `GET /api/track?tracking=CX-...` looks up a PostEx tracking number.
 - `GET /api/track-order?orderNumber=...&customer=...` matches the PostEx `orderRefNumber` with either `deliveryAddress` (email) or `customerPhone` and returns limited tracking details.
 
-PostEx's guide does not provide a direct order-reference lookup. The second route uses `get-all-order` across `2000-01-01` through today and checks the exact order number and email on the server. The guide does not specify whether PostEx limits this date range or result size; if their API limits it, older orders may need a date/index strategy confirmed with PostEx support.
+PostEx's guide does not provide a direct order-reference lookup. The second route uses `get-all-order` for the most recent 365 days by default and checks the order number and email or phone on the server. Set `POSTEX_LOOKBACK_DAYS` in the hosting environment to change this search window.
 
 ## Configure
 

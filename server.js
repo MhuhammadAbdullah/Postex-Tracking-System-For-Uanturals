@@ -9,6 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const POSTEX_TOKEN = process.env.MY_POSTEX_TOKEN;
 const POSTEX_API = "https://api.postex.pk/services/integration/api/order/v1";
+const POSTEX_LOOKBACK_DAYS = Number(process.env.POSTEX_LOOKBACK_DAYS || 365);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "https://www.uanaturals.com,http://localhost:3000")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 
@@ -18,10 +19,12 @@ async function postexGet(url) {
   if (!POSTEX_TOKEN) throw new Error("PostEx token is not configured");
   const response = await fetch(url, {
     headers: { token: POSTEX_TOKEN, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30000),
   });
   const data = await response.json().catch(() => null);
-  if (!response.ok || !data) throw new Error(`PostEx request failed (${response.status})`);
+  if (!response.ok || !data) {
+    throw Object.assign(new Error(`PostEx request failed (${response.status})`), { status: response.status });
+  }
   return data;
 }
 
@@ -59,7 +62,9 @@ app.get("/api/track", async (req, res) => {
     const missingToken = !POSTEX_TOKEN;
     return res.status(missingToken ? 503 : 502).json({
       success: false,
-      message: missingToken ? "Tracking service is not configured" : "Could not reach PostEx. Please try again later.",
+      message: missingToken ? "Tracking service is not configured"
+        : error.status ? `PostEx rejected the request (HTTP ${error.status}). Check the API token and request settings.`
+        : "PostEx did not respond in time. Please try again later.",
     });
   }
 });
@@ -78,16 +83,26 @@ app.get("/api/track-order", async (req, res) => {
   }
 
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const params = new URLSearchParams({ orderStatusID: "0", fromDate: "2000-01-01", toDate: today });
+    const today = new Date();
+    const fromDate = new Date(today);
+    fromDate.setUTCDate(fromDate.getUTCDate() - Math.max(1, POSTEX_LOOKBACK_DAYS));
+    const params = new URLSearchParams({
+      orderStatusID: "0",
+      fromDate: fromDate.toISOString().slice(0, 10),
+      toDate: today.toISOString().slice(0, 10),
+    });
     const data = await postexGet(`${POSTEX_API}/get-all-order?${params}`);
     if (!validResult(data) || !Array.isArray(data.dist)) {
-      return res.status(502).json({ success: false, message: "PostEx could not retrieve orders." });
+      return res.status(502).json({
+        success: false,
+        message: data?.statusMessage || "PostEx rejected the order lookup request.",
+      });
     }
 
     const found = data.dist.map((entry) => entry?.trackingResponse || entry)
       .find((order) => {
-        if (String(order?.orderRefNumber || "").trim().toLowerCase() !== orderNumber.toLowerCase()) return false;
+        const cleanOrderNumber = (value) => String(value || "").trim().replace(/^#/, "").toLowerCase();
+        if (cleanOrderNumber(order?.orderRefNumber) !== cleanOrderNumber(orderNumber)) return false;
         if (isEmail) return String(order?.deliveryAddress || "").trim().toLowerCase() === email;
         const orderPhone = String(order?.customerPhone || "").replace(/\D/g, "");
         return orderPhone === phoneDigits || (orderPhone.length >= 10 && phoneDigits.length >= 10
@@ -104,7 +119,9 @@ app.get("/api/track-order", async (req, res) => {
     const missingToken = !POSTEX_TOKEN;
     return res.status(missingToken ? 503 : 502).json({
       success: false,
-      message: missingToken ? "Tracking service is not configured" : "Could not reach PostEx. Please try again later.",
+      message: missingToken ? "Tracking service is not configured"
+        : error.status ? `PostEx rejected the request (HTTP ${error.status}). Check the API token and request settings.`
+        : "PostEx did not respond in time. Please try again later.",
     });
   }
 });
