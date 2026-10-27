@@ -12,7 +12,9 @@ const POSTEX_API = "https://api.postex.pk/services/integration/api/order/v1";
 const POSTEX_LOOKBACK_DAYS = Number(process.env.POSTEX_LOOKBACK_DAYS || 365);
 const SHOPIFY_STORE_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || "").trim();
 const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
-const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-07";
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
+const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2026-10";
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "https://www.uanaturals.com,http://localhost:3000")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 
@@ -57,8 +59,43 @@ function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+let shopifyTokenCache = null;
+
+async function getShopifyAccessToken(shopDomain) {
+  // Existing admin-created custom apps can continue using their static token.
+  if (SHOPIFY_ADMIN_ACCESS_TOKEN) return SHOPIFY_ADMIN_ACCESS_TOKEN;
+  if (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET) {
+    throw new Error("Set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET in the hosting environment");
+  }
+  if (shopifyTokenCache && shopifyTokenCache.expiresAt > Date.now() + 60_000) {
+    return shopifyTokenCache.accessToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: SHOPIFY_CLIENT_ID,
+    client_secret: SHOPIFY_CLIENT_SECRET,
+  });
+  const response = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.access_token) {
+    console.error("Shopify token exchange failed:", response.status, data?.error || data?.error_description || "No access token returned");
+    throw new Error("Shopify could not issue an access token. Check app installation and credentials.");
+  }
+  shopifyTokenCache = {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + Number(data.expires_in || 86399) * 1000,
+  };
+  return shopifyTokenCache.accessToken;
+}
+
 async function findShopifyOrder(orderNumber, customer) {
-  if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ADMIN_ACCESS_TOKEN) return null;
+  if (!SHOPIFY_STORE_DOMAIN || (!SHOPIFY_ADMIN_ACCESS_TOKEN && (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET))) return null;
 
   const safeDomain = SHOPIFY_STORE_DOMAIN.replace(/^https?:\/\//i, "").replace(/\/$/, "");
   if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]*\.myshopify\.com$/.test(safeDomain)) {
@@ -82,11 +119,12 @@ async function findShopifyOrder(orderNumber, customer) {
     }
   }`;
 
+  const accessToken = await getShopifyAccessToken(safeDomain);
   const response = await fetch(`https://${safeDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": SHOPIFY_ADMIN_ACCESS_TOKEN,
+      "X-Shopify-Access-Token": accessToken,
     },
     body: JSON.stringify({ query, variables: { search: searchTerm } }),
     signal: AbortSignal.timeout(15000),
@@ -177,7 +215,7 @@ app.get("/api/track-order", async (req, res) => {
   }
 
   try {
-    if (SHOPIFY_STORE_DOMAIN && SHOPIFY_ADMIN_ACCESS_TOKEN) {
+    if (SHOPIFY_STORE_DOMAIN && (SHOPIFY_ADMIN_ACCESS_TOKEN || (SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET))) {
       const shopifyOrder = await findShopifyOrder(orderNumber, customer);
       if (!shopifyOrder) {
         return res.status(404).json({ success: false, message: "Shopify order nahi mila. Order number aur checkout email/phone check karein." });
